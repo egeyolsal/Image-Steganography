@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import cv2
 import os
-import last
+import lastfast
 
 class StegoGUI:
     def __init__(self, root):
@@ -96,7 +96,7 @@ class StegoGUI:
             return
         
         try:
-            last.encode_image_raw_pixels(
+            lastfast.encode_image_raw_pixels(
                 self.original_image_path,
                 "share",
                 k=self.k_var.get(),
@@ -173,7 +173,7 @@ class StegoGUI:
             return
         
         try:
-            last.decode_image_raw_pixels(
+            lastfast.decode_image_raw_pixels(
                 self.selected_shares,
                 "decoded_image.jpg",
                 self.original_image_path,
@@ -206,7 +206,7 @@ class StegoGUI:
             return
         
         try:
-            psnr_value = last.calculate_psnr(original, decoded)
+            psnr_value = lastfast.calculate_psnr(original, decoded)
             self.psnr_label.config(text=f"PSNR: {psnr_value:.2f} dB")
         except:
             self.psnr_label.config(text="PSNR Hesaplanamadı")

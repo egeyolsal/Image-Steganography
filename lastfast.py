@@ -1,142 +1,138 @@
 import cv2
 import numpy as np
-from math import log10, sqrt, ceil
+from math import log10, sqrt, ceil # PSNR hesaplaması için
 import secrets
 import traceback
 import json
-import hashlib  # Checksum için eklendi
 
-# --- Galois Field (GF257) Optimizasyonları ---
+# --- Galois Field (GF257) İşlemleri ---
 PRIME = 257
+# ... (gf_add, gf_sub, gf_mul, gf_inverse, gf_div fonksiyonları burada) ...
+def gf_add(a, b): return (a + b) % PRIME
+def gf_sub(a, b): return (a - b) % PRIME
+def gf_mul(a, b): return (a * b) % PRIME
+def gf_inverse(a):
+    if a == 0: raise ValueError(f"GF({PRIME}) içinde sıfırın tersi yoktur")
+    return pow(a, PRIME - 2, PRIME)
+def gf_div(a, b):
+    if b == 0: raise ValueError(f"GF({PRIME}) içinde sıfıra bölme yapılamaz")
+    return gf_mul(a, gf_inverse(b))
 
-# Vektörleştirilmiş GF operasyonları
-def gf_add_vec(a, b): return (a + b) % PRIME
-def gf_sub_vec(a, b): return (a - b) % PRIME
-gf_mul_vec = np.vectorize(lambda a, b: (a * b) % PRIME)
-gf_inverse_vec = np.vectorize(lambda a: pow(a, PRIME-2, PRIME) if a != 0 else 0)
-
-# --- Gizli Paylaşım Optimizasyonları ---
+# --- Gizli Paylaşım Sınıfı ---
 class Share:
-    __slots__ = ('x', 'data')  # Bellek optimizasyonu
+    # ... (Share sınıfı burada) ...
     def __init__(self, x, data):
         self.x = x
         self.data = data
 
+# --- Gizli Paylaşım Fonksiyonları ---
 def split_secret(secret_bytes, k, n):
     if not (1 < k <= n):
-        raise ValueError("Geçersiz k ve n değerleri")
-    
-    # Tüm x değerlerini ve kuvvetlerini önceden hesapla
-    x_values = np.arange(1, n+1, dtype=np.uint16)
-    powers = np.zeros((n, k), dtype=np.uint16)
-    for i in range(k):
-        powers[:, i] = np.power(x_values, i, dtype=np.uint16) % PRIME
-    
-    shares = [Share(x, bytearray()) for x in x_values]
-    secret_arr = np.frombuffer(secret_bytes, dtype=np.uint8)
-    
-    for byte in secret_arr:
-        # Rastgele katsayıları vektörleştirilmiş olarak oluştur
-        coeffs = np.concatenate([[byte], np.random.randint(0, PRIME, k-1, dtype=np.uint16)])
-        
-        # Polinom değerlerini matris çarpımı ile hesapla
-        y_values = (coeffs * powers).sum(axis=1) % PRIME
-        
-        # Paylara yaz
-        for share, y in zip(shares, y_values):
-            share.data.extend(y.tobytes())
-    
+        raise ValueError("k, n'den büyük olamaz ve 1'den büyük olmalıdır (genellikle k >= 2).")
+    shares = [Share(x, bytearray()) for x in range(1, n + 1)]
+    for original_byte_val in secret_bytes:
+        coeffs = [original_byte_val] + [secrets.randbelow(PRIME) for _ in range(k - 1)]
+        for share in shares:
+            y = 0
+            for i, coeff in enumerate(coeffs):
+                term_pow_x = pow(share.x, i, PRIME)
+                term = gf_mul(coeff, term_pow_x)
+                y = gf_add(y, term)
+            share.data.extend(y.to_bytes(2, 'big'))
     return shares
 
-def combine_shares(shares, k):
-    # Tüm veriyi NumPy array olarak yükle
-    share_data = np.frombuffer(shares[0].data, dtype=np.uint16).reshape(-1, 2)
-    num_bytes = share_data.shape[0]
-    
-    # Lagrange interpolasyonunu vektörleştir
-    x = np.array([s.x for s in shares], dtype=np.uint16)
-    secret = np.zeros(num_bytes, dtype=np.uint8)
-    
-    for i in range(num_bytes):
-        y = np.array([int.from_bytes(s.data[2*i:2*i+2], 'big') for s in shares], dtype=np.uint16)
-        
-        # Vektörleştirilmiş Lagrange hesabı
-        j = np.arange(len(x))
-        mask = j[:, None] != j[None, :]
-        numerator = np.prod(x * mask, axis=1)
-        denominator = np.prod((x - x[:, None]) * np.eye(len(x), dtype=np.uint16) + ~mask, axis=1)
-        
-        secret[i] = np.sum(y * gf_mul_vec(numerator, gf_inverse_vec(denominator))) % 256
-        
-    return secret.tobytes()
+def combine_shares(shares_list, k_threshold):
+    # ... (combine_shares fonksiyonu burada) ...
+    if len(shares_list) < k_threshold:
+        raise ValueError(f"Sırrı yeniden oluşturmak için en az {k_threshold} pay gereklidir.")
+    if not shares_list or not shares_list[0].data:
+        return b""
+    expected_data_len = len(shares_list[0].data)
+    if expected_data_len % 2 != 0:
+        raise ValueError("Pay veri uzunluğu geçersiz (2'nin katı olmalı).")
+    for s_check in shares_list: # Tüm payların aynı uzunlukta olduğunu kontrol et
+        if len(s_check.data) != expected_data_len:
+            raise ValueError("Tüm paylar aynı uzunlukta veri içermiyor.")
 
-# --- LSB Steganografi Optimizasyonları ---
-def embed_data(img, data):
-    # Veriyi hazırla
-    data_len = len(data).to_bytes(4, 'big')
-    full_data = data_len + data + hashlib.md5(data).digest()  # Checksum eklendi
-    
-    # Bitleri NumPy ile işle
-    bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8))
-    required_pixels = ceil(len(bits)/3)
-    
-    # Resmi tek seferde yeniden boyutlandır
-    h, w = img.shape[:2]
-    if h*w < required_pixels:
-        new_size = int(np.sqrt(required_pixels)) + 1
-        img = cv2.resize(img, (new_size, new_size))
-    
-    # Tüm pikselleri tek seferde işle
-    flat = img.reshape(-1, 3)
-    bits_padded = np.pad(bits, (0, flat.size - len(bits)), 'constant')
-    flat = (flat & 0xFE) | bits_padded.reshape(-1, 3)
-    
-    return flat.reshape(img.shape)
+    num_original_bytes = expected_data_len // 2
+    secret_reconstructed_bytes = bytearray()
+    for i_block in range(num_original_bytes):
+        points = []
+        current_byte_start_index = i_block * 2
+        for share in shares_list:
+            y_val_bytes = share.data[current_byte_start_index : current_byte_start_index + 2]
+            y_val = int.from_bytes(y_val_bytes, 'big')
+            points.append((share.x, y_val))
+        current_secret_byte_reconstructed = 0
+        for j, (xj, yj) in enumerate(points):
+            lagrange_basis_numerator = 1
+            lagrange_basis_denominator = 1
+            for m, (xm, _) in enumerate(points):
+                if m == j: continue
+                lagrange_basis_numerator = gf_mul(lagrange_basis_numerator, xm)
+                denominator_term = gf_sub(xm, xj)
+                if denominator_term == 0: raise ValueError("Lagrange payda sıfır.")
+                lagrange_basis_denominator = gf_mul(lagrange_basis_denominator, denominator_term)
+            lagrange_basis_at_zero = gf_div(lagrange_basis_numerator, lagrange_basis_denominator)
+            term = gf_mul(yj, lagrange_basis_at_zero)
+            current_secret_byte_reconstructed = gf_add(current_secret_byte_reconstructed, term)
+        secret_reconstructed_bytes.append(current_secret_byte_reconstructed % 256)
+    return bytes(secret_reconstructed_bytes)
 
-def extract_data(img):
-    # Tüm bitleri tek seferde çıkar
-    bits = (img.reshape(-1, 3) & 1).ravel()
-    
-    # Veri uzunluğunu oku
-    data_len = int(''.join(bits[:32].astype(str)), 2)
-    
-    # Veriyi doğrudan NumPy ile paketle
-    data_bits = bits[32:32+data_len*8+128]  # 128 bit checksum
-    data = np.packbits(data_bits[:data_len*8]).tobytes()
-    checksum = np.packbits(data_bits[data_len*8:]).tobytes()
-    
-    if hashlib.md5(data).digest() != checksum:
-        raise ValueError("Veri bozuk! Checksum uyuşmuyor.")
-    
-    return data
+def embed_data(img_to_embed_in, data_to_embed):
+    data_len_bytes = len(data_to_embed).to_bytes(4, 'big')
+    full_data_to_embed = data_len_bytes + data_to_embed
+    bits_to_embed = np.unpackbits(np.frombuffer(full_data_to_embed, dtype=np.uint8))
+    num_bits_to_embed = bits_to_embed.size
 
-# --- PSNR HESAPLAMA ---
+    img_h, img_w = img_to_embed_in.shape[:2]
+    img_capacity_bits = img_h * img_w * 3
+
+    # Yetersiz kapasite durumunda görseli yeniden boyutlandır
+    if img_capacity_bits < num_bits_to_embed:
+        required_pixels = np.ceil(num_bits_to_embed / 3).astype(int)
+        new_dim = int(np.sqrt(required_pixels)) + 1
+        img_to_embed_in = cv2.resize(img_to_embed_in, (new_dim, new_dim), interpolation=cv2.INTER_NEAREST)
+        img_h, img_w = img_to_embed_in.shape[:2]
+
+    # Tüm kanalları tek bir düzleme dönüştür ve LSB'leri sıfırla
+    flat_img = img_to_embed_in.reshape(-1, 3)
+    flat_img = (flat_img & 0xFE).astype(np.uint8)
+
+    # Gömülecek bitleri ekle
+    flat_img.flat[:num_bits_to_embed] |= bits_to_embed[:flat_img.size]
+
+    # Orijinal şekle geri dönüştür
+    embedded_img = flat_img.reshape(img_h, img_w, 3)
+    return embedded_img
+
+def extract_data(stego_img):
+    # Tüm LSB bitlerini tek seferde çıkar
+    lsb_bits = (stego_img & 1).reshape(-1)
+    lsb_bits_str = lsb_bits.astype(np.uint8).astype(str)
+    all_extracted_bits = ''.join(lsb_bits_str)
+
+    # İlk 32 biti (veri uzunluğu) oku
+    if len(all_extracted_bits) < 32:
+        raise ValueError("Veri uzunluğu okunamadı.")
+    data_len = int(all_extracted_bits[:32], 2)
+    total_bits_needed = 32 + data_len * 8
+
+    # Yeterli bit kontrolü
+    if len(all_extracted_bits) < total_bits_needed:
+        raise ValueError("Yetersiz bit.")
+
+    # Veriyi çıkar
+    payload_bits = all_extracted_bits[32:total_bits_needed]
+    payload_bytes = np.packbits(np.array(list(payload_bits), dtype=np.uint8).reshape(-1, 8), axis=1).tobytes()
+    return bytes(payload_bytes)
+
 def calculate_psnr(img1, img2):
-
-    # Görüntülerin None olup olmadığını kontrol et
-    if img1 is None or img2 is None:
-        print("PSNR hesaplaması için bir veya iki görüntü None (boş).")
-        return -1 # veya bir hata fırlat
-
-    # Boyut kontrolü
     if img1.shape != img2.shape:
-        print(f"PSNR hesaplaması için görüntü boyutları farklı: {img1.shape} vs {img2.shape}")
-        # img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
-        # print("İkinci görüntü, ilk görüntünün boyutuna getirildi.")
-        return -1 # Veya boyutları eşitlemeden devam etme
+        return -1
+    mse = np.mean((img1.astype(np.float64) - img2.astype(np.float64)) ** 2)
+    return 10 * np.log10(255.0 ** 2 / mse) if mse != 0 else float('inf')
 
-    # Görüntüleri float tipine dönüştür
-    img1 = img1.astype(np.float64)
-    img2 = img2.astype(np.float64)
-
-    mse = np.mean((img1 - img2) ** 2)
-
-    if mse == 0:
-        return float('inf') 
-
-    max_pixel_value = 255.0
-    psnr = 10 * log10(max_pixel_value ** 2 / mse)
-    return psnr
 
 # --- Ana İş Akışı ---
 DEFAULT_K = 3
@@ -144,59 +140,101 @@ DEFAULT_N = 6
 METADATA_KEY_SHAPE = "shape"
 METADATA_KEY_DTYPE = "dtype_str"
 
-
-# --- Ana İş Akışı Optimizasyonları ---
 def encode_image_raw_pixels(image_path, output_prefix, k=DEFAULT_K, n=DEFAULT_N):
-    img = cv2.imread(image_path)
-    if img is None:
+    original_img = cv2.imread(image_path)
+    if original_img is None:
         raise FileNotFoundError(f"Görüntü bulunamadı: {image_path}")
-    
-    # Veriyi hazırla
-    raw_pixels = img.tobytes()
-    metadata = json.dumps({
-        "shape": img.shape,
-        "dtype": str(img.dtype),
-        "checksum": hashlib.md5(raw_pixels).hexdigest()
-    }).encode()
-    
-    # Tüm veriyi paketle
-    secret_data = len(metadata).to_bytes(4, 'big') + metadata + raw_pixels
-    
-    # Paylaşımları oluştur
-    shares = split_secret(secret_data, k, n)
-    
-    # Görüntüleri paralel oluştur
-    base_img = np.random.randint(0, 256, (256, 256, 3), dtype=np.uint8)  # Rastgele gürültü
-    for share in shares:
-        stego = embed_data(base_img.copy(), bytes(share.data))
-        cv2.imwrite(f"{output_prefix}_{share.x}.png", stego)
+    img_shape = original_img.shape
+    img_dtype_str = str(original_img.dtype)
+    raw_pixel_bytes = original_img.tobytes()
+    metadata = { METADATA_KEY_SHAPE: img_shape, METADATA_KEY_DTYPE: img_dtype_str }
+    metadata_json_str = json.dumps(metadata)
+    metadata_bytes = metadata_json_str.encode('utf-8')
+    metadata_len_bytes = len(metadata_bytes).to_bytes(4, 'big')
+    secret_data = metadata_len_bytes + metadata_bytes + raw_pixel_bytes
+    print(f"Orijinal: {image_path}, Shape: {img_shape}, Dtype: {img_dtype_str}")
+    print(f"Şifrelenecek toplam veri: {len(secret_data)} bayt.")
+    list_of_shares = split_secret(secret_data, k, n)
+    print(f"{n} pay oluşturuldu. Her payın veri boyutu: {len(list_of_shares[0].data)} bayt.")
+    base_cover_img = np.full((100, 100, 3), 128, dtype=np.uint8)
+    for share_object in list_of_shares:
+        stego_image = embed_data(base_cover_img.copy(), bytes(share_object.data))
+        output_filename = f"{output_prefix}_{share_object.x}.png"
+        cv2.imwrite(output_filename, stego_image)
+        print(f"Pay {share_object.x} > Stego: '{output_filename}'")
 
-def decode_image_raw_pixels(share_paths, output_path, original_image_for_psnr_path, k_threshold=DEFAULT_K, save_as_jpeg_quality=90):
-    # Payları yükle
-    shares = []
-    for path in share_paths:
+
+def decode_image_raw_pixels(list_of_share_paths, output_image_path_template, original_image_for_psnr_path, k_threshold=DEFAULT_K, save_as_jpeg_quality=90):
+    collected_shares = []
+    if len(list_of_share_paths) < k_threshold:
+        print(f"Hata: Yetersiz pay. Gerekli: {k_threshold}, Sağlanan: {len(list_of_share_paths)}")
+        return
+    for path in list_of_share_paths:
         img = cv2.imread(path)
-        shares.append(Share(
-            int(path.split('_')[-1].split('.')[0]),
-            extract_data(img)
-        ))
-    
-    # Sırrı birleştir
-    secret_data = combine_shares(shares, k_threshold)
-    
-    # Metadata'yı parse et
-    metadata_len = int.from_bytes(secret_data[:4], 'big')
-    metadata = json.loads(secret_data[4:4+metadata_len].decode())
-    pixels = secret_data[4+metadata_len:]
-    
-    # Checksum kontrolü
-    if hashlib.md5(pixels).hexdigest() != metadata['checksum']:
-        raise ValueError("Veri bütünlüğü bozuk!")
-    
-    # Görüntüyü yeniden oluştur
-    img = np.frombuffer(pixels, dtype=np.dtype(metadata['dtype']))
-    cv2.imwrite(output_path, img.reshape(metadata['shape']))
+        if img is None: print(f"Uyarı: '{path}' okunamadı."); continue
+        try:
+            data = extract_data(img)
+            x = int(path.split('_')[-1].split('.')[0])
+            collected_shares.append(Share(x, data))
+            print(f"Pay okundu: '{path}', x={x}")
+        except Exception as e: print(f"'{path}' işlenirken hata: {e}"); traceback.print_exc()
+    if len(collected_shares) < k_threshold:
+        print(f"Hata: Yeterli geçerli pay okunamadı ({len(collected_shares)}/{k_threshold}).")
+        return
 
+    try:
+        reconstructed_full_secret_bytes = combine_shares(collected_shares, k_threshold)
+        if not reconstructed_full_secret_bytes:
+             print("HATA: Yeniden oluşturulan sır boş.")
+             return
+        print(f"Toplam sır başarıyla yeniden oluşturuldu. Boyut: {len(reconstructed_full_secret_bytes)} bayt.")
+
+        metadata_len = int.from_bytes(reconstructed_full_secret_bytes[:4], 'big')
+        metadata_bytes = reconstructed_full_secret_bytes[4 : 4 + metadata_len]
+        raw_pixel_bytes_reconstructed = reconstructed_full_secret_bytes[4 + metadata_len :]
+        metadata_json_str = metadata_bytes.decode('utf-8')
+        metadata = json.loads(metadata_json_str)
+        img_shape_reconstructed = tuple(metadata[METADATA_KEY_SHAPE])
+        img_dtype_reconstructed_str = metadata[METADATA_KEY_DTYPE]
+        img_dtype_reconstructed = np.dtype(img_dtype_reconstructed_str)
+        print(f"Yeniden oluşturulan meta: Shape={img_shape_reconstructed}, Dtype={img_dtype_reconstructed_str}")
+
+        reconstructed_image_raw = np.frombuffer(raw_pixel_bytes_reconstructed, dtype=img_dtype_reconstructed)
+        try:
+            reconstructed_image_raw = reconstructed_image_raw.reshape(img_shape_reconstructed)
+        except ValueError as e_reshape:
+            print(f"HATA: Yeniden oluşturulan piksel verisi beklenen şekle ({img_shape_reconstructed}) getirilemedi. Hata: {e_reshape}")
+            return
+        if reconstructed_image_raw is None or reconstructed_image_raw.size == 0 :
+            print("HATA: Ham piksellerden görüntü oluşturulamadı.")
+            return
+        
+        # output_png_path = output_image_path_template.format(ext="png")
+        # cv2.imwrite(output_png_path, reconstructed_image_raw)
+        # print(f"Görüntü PNG olarak kaydedildi: '{output_png_path}'")
+        output_jpg_path = output_image_path_template.format(ext="jpg")
+        jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), save_as_jpeg_quality]
+        cv2.imwrite(output_jpg_path, reconstructed_image_raw, jpeg_params)
+        print(f"Görüntü JPEG olarak (kalite {save_as_jpeg_quality}) kaydedildi: '{output_jpg_path}'")
+
+        original_img_for_psnr = cv2.imread(original_image_for_psnr_path)
+        if original_img_for_psnr is None:
+            print(f"Uyarı: PSNR için orijinal '{original_image_for_psnr_path}' bulunamadı.")
+        else:
+            # psnr_png = calculate_psnr(original_img_for_psnr, reconstructed_image_raw) # Ham ile karşılaştır
+            # print(f"PSNR (Orijinal vs Yeniden Oluşturulmuş Ham -> PNG): {psnr_png:.2f} dB")
+            reconstructed_jpeg_for_psnr = cv2.imread(output_jpg_path)
+            if reconstructed_jpeg_for_psnr is not None:
+                psnr_jpeg = calculate_psnr(original_img_for_psnr, reconstructed_jpeg_for_psnr)
+                print(f"PSNR (Orijinal vs Yeniden Oluşturulmuş JPEG Kalite {save_as_jpeg_quality}): {psnr_jpeg:.2f} dB")
+            else:
+                print(f"Uyarı: Yeniden oluşturulmuş JPEG ('{output_jpg_path}') PSNR için okunamadı.")
+    except ValueError as e:
+        print(f"HATA (Decode): {e}")
+        traceback.print_exc()
+    except Exception as e:
+        print(f"HATA (Decode - Genel): {e}")
+        traceback.print_exc()
 
 # Kullanım Örneği
 if __name__ == "__main__":
