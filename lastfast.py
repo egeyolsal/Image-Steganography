@@ -5,8 +5,8 @@ import secrets
 import traceback
 import json
 
-# --- Galois Field (GF257) İşlemleri ---
-PRIME = 257
+# --- Galois Field İşlemleri ---
+PRIME = 251
 # ... (gf_add, gf_sub, gf_mul, gf_inverse, gf_div fonksiyonları burada) ...
 def gf_add(a, b): return (a + b) % PRIME
 def gf_sub(a, b): return (a - b) % PRIME
@@ -42,7 +42,6 @@ def split_secret(secret_bytes, k, n):
     return shares
 
 def combine_shares(shares_list, k_threshold):
-    # ... (combine_shares fonksiyonu burada) ...
     if len(shares_list) < k_threshold:
         raise ValueError(f"Sırrı yeniden oluşturmak için en az {k_threshold} pay gereklidir.")
     if not shares_list or not shares_list[0].data:
@@ -106,26 +105,48 @@ def embed_data(img_to_embed_in, data_to_embed):
     embedded_img = flat_img.reshape(img_h, img_w, 3)
     return embedded_img
 
+# def extract_data(stego_img):
+#     # Tüm LSB bitlerini tek seferde çıkar
+#     lsb_bits = (stego_img & 1).reshape(-1)
+#     lsb_bits_str = lsb_bits.astype(np.uint8).astype(str)
+#     all_extracted_bits = ''.join(lsb_bits_str)
+
+#     # İlk 32 biti (veri uzunluğu) oku
+#     if len(all_extracted_bits) < 32:
+#         raise ValueError("Veri uzunluğu okunamadı.")
+#     data_len = int(all_extracted_bits[:32], 2)
+#     total_bits_needed = 32 + data_len * 8
+
+#     # Yeterli bit kontrolü
+#     if len(all_extracted_bits) < total_bits_needed:
+#         raise ValueError("Yetersiz bit.")
+
+#     # Veriyi çıkar
+#     payload_bits = all_extracted_bits[32:total_bits_needed]
+#     payload_bytes = np.packbits(np.array(list(payload_bits), dtype=np.uint8).reshape(-1, 8), axis=1).tobytes()
+#     return bytes(payload_bytes)
+
 def extract_data(stego_img):
-    # Tüm LSB bitlerini tek seferde çıkar
-    lsb_bits = (stego_img & 1).reshape(-1)
-    lsb_bits_str = lsb_bits.astype(np.uint8).astype(str)
-    all_extracted_bits = ''.join(lsb_bits_str)
-
-    # İlk 32 biti (veri uzunluğu) oku
-    if len(all_extracted_bits) < 32:
+    # Tüm LSB'leri tek seferde al
+    lsb_bits = (stego_img & 1).astype(np.uint8)
+    
+    # Bitleri birleştirerek byte'lara dönüştür
+    bits_flat = lsb_bits.reshape(-1)
+    bytes_flat = np.packbits(bits_flat, axis=0)
+    
+    # İlk 4 byte (32 bit) veri uzunluğunu oku
+    if len(bytes_flat) < 4:
         raise ValueError("Veri uzunluğu okunamadı.")
-    data_len = int(all_extracted_bits[:32], 2)
-    total_bits_needed = 32 + data_len * 8
-
-    # Yeterli bit kontrolü
-    if len(all_extracted_bits) < total_bits_needed:
-        raise ValueError("Yetersiz bit.")
-
+    data_len = int.from_bytes(bytes_flat[:4].tobytes(), 'big')
+    
+    # Toplam gerekli byte sayısını hesapla
+    total_bytes_needed = 4 + data_len
+    if len(bytes_flat) < total_bytes_needed:
+        raise ValueError("Yetersiz veri.")
+    
     # Veriyi çıkar
-    payload_bits = all_extracted_bits[32:total_bits_needed]
-    payload_bytes = np.packbits(np.array(list(payload_bits), dtype=np.uint8).reshape(-1, 8), axis=1).tobytes()
-    return bytes(payload_bytes)
+    payload_bytes = bytes_flat[4:total_bytes_needed].tobytes()
+    return payload_bytes
 
 def calculate_psnr(img1, img2):
     if img1.shape != img2.shape:
