@@ -21,6 +21,9 @@ class StegoGUI:
         self.selected_shares = []
         self.share_thumbnails = []
         
+        self.cover_image_path = None
+        self.style.configure("CoverSelected.TLabel", background="#ADD8E6")  # Yeni stil
+        
         # GUI bileşenleri
         self.create_widgets()
 
@@ -40,6 +43,9 @@ class StegoGUI:
         ttk.Spinbox(control_frame, from_=2, to=10, textvariable=self.n_var, width=5).pack(side=tk.LEFT, padx=5)
         
         ttk.Button(control_frame, text="Resim Seç", command=self.load_image).pack(side=tk.LEFT, padx=10)
+        ttk.Button(control_frame, text = "Cover Seç", command = self.load_cover_image).pack(side=tk.LEFT, padx=10)
+        self.cover_info_label = ttk.Label(control_frame, text="Cover: Yok")
+        self.cover_info_label.pack(side=tk.RIGHT, padx=20)
         ttk.Button(control_frame, text="Encode", command=self.encode_image).pack(side=tk.LEFT, padx=10)
         ttk.Button(control_frame, text="Decode", command=self.decode_image).pack(side=tk.LEFT, padx=10)
         
@@ -84,6 +90,17 @@ class StegoGUI:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
+    # Değişiklik 3: Cover image yükleme fonksiyonu
+    def load_cover_image(self):
+        path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
+        if path:
+            self.cover_image_path = path
+            self.cover_info_label.config(
+                text=f"Cover: {os.path.basename(path)}",
+                style="CoverSelected.TLabel"
+            )
+            # self.show_image(path, self.input_label, 400)
+
     def load_image(self):
         path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
         if path:
@@ -100,7 +117,8 @@ class StegoGUI:
                 self.original_image_path,
                 "share",
                 k=self.k_var.get(),
-                n=self.n_var.get()
+                n=self.n_var.get(),
+                cover_image_path=self.cover_image_path
             )
             self.load_share_thumbnails()
             messagebox.showinfo("Başarılı", f"{self.n_var.get()} pay oluşturuldu!")
@@ -210,6 +228,7 @@ class StegoGUI:
             self.psnr_label.config(text=f"PSNR: {psnr_value:.2f} dB")
         except:
             self.psnr_label.config(text="PSNR Hesaplanamadı")
+
 if __name__ == "__main__":
     root = tk.Tk()
     

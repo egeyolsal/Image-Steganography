@@ -96,7 +96,7 @@ def embed_data(img_to_embed_in, data_to_embed):
 
     # Tüm kanalları tek bir düzleme dönüştür ve LSB'leri sıfırla
     flat_img = img_to_embed_in.reshape(-1, 3)
-    flat_img = (flat_img & 0xFE).astype(np.uint8)
+    flat_img = (flat_img & 0xFE).astype(np.uint8)  # 0xFE - 11111110
 
     # Gömülecek bitleri ekle
     flat_img.flat[:num_bits_to_embed] |= bits_to_embed[:flat_img.size]
@@ -161,7 +161,7 @@ DEFAULT_N = 6
 METADATA_KEY_SHAPE = "shape"
 METADATA_KEY_DTYPE = "dtype_str"
 
-def encode_image_raw_pixels(image_path, output_prefix, k=DEFAULT_K, n=DEFAULT_N):
+def encode_image_raw_pixels(image_path, output_prefix, k=DEFAULT_K, n=DEFAULT_N, cover_image_path = None):
     original_img = cv2.imread(image_path)
     if original_img is None:
         raise FileNotFoundError(f"Görüntü bulunamadı: {image_path}")
@@ -178,12 +178,29 @@ def encode_image_raw_pixels(image_path, output_prefix, k=DEFAULT_K, n=DEFAULT_N)
     list_of_shares = split_secret(secret_data, k, n)
     print(f"{n} pay oluşturuldu. Her payın veri boyutu: {len(list_of_shares[0].data)} bayt.")
     base_cover_img = np.full((100, 100, 3), 128, dtype=np.uint8)
+    if cover_image_path:
+        base_cover_img = cv2.imread(cover_image_path)
+        if base_cover_img is None:
+            print(f"Uyarı: Cover image '{cover_image_path}' bulunamadı, varsayılan gri image kullanılıyor.")
+            base_cover_img = np.full((100, 100, 3), 128, dtype = np.uint8)
+    else:
+        base_cover_img = base_cover_img = np.full((100, 100, 3), 128, dtype=np.uint8)
+
+     # Kapasite kontrolü ve otomatik boyutlandırma
+    required_capacity = len(secret_data) * 8  # Her byte için 8 bit
+    img_h, img_w = base_cover_img.shape[:2]
+    available_capacity = img_h * img_w * 3  # 3 kanal (RGB)
+    
+    if available_capacity < required_capacity:
+        new_dim = ceil(sqrt((required_capacity / 3)))
+        base_cover_img = cv2.resize(base_cover_img, (new_dim, new_dim), interpolation=cv2.INTER_AREA)
+        print(f"Cover imaj {new_dim}x{new_dim} boyutuna yeniden boyutlandırıldı")
+
     for share_object in list_of_shares:
         stego_image = embed_data(base_cover_img.copy(), bytes(share_object.data))
         output_filename = f"{output_prefix}_{share_object.x}.png"
         cv2.imwrite(output_filename, stego_image)
         print(f"Pay {share_object.x} > Stego: '{output_filename}'")
-
 
 def decode_image_raw_pixels(list_of_share_paths, output_image_path_template, original_image_for_psnr_path, k_threshold=DEFAULT_K, save_as_jpeg_quality=90):
     collected_shares = []
@@ -279,7 +296,7 @@ if __name__ == "__main__":
 
     print(f"\n--- HAM PİKSEL KODLAMA (Giriş: {INPUT_IMAGE_FILENAME}) ---")
     try:
-        encode_image_raw_pixels(INPUT_IMAGE_FILENAME, SHARE_OUTPUT_PREFIX, k=K_PARAM, n=N_PARAM)
+        encode_image_raw_pixels(INPUT_IMAGE_FILENAME, SHARE_OUTPUT_PREFIX, k=K_PARAM, n=N_PARAM, cover_image_path = "flower.jpg")
     except FileNotFoundError as e_fnf:
         print(f"Kodlama Hatası: {e_fnf}")
     except Exception as e_encode:
