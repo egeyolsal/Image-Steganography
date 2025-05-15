@@ -22,6 +22,7 @@ class StegoGUI:
         self.share_thumbnails = []
         
         self.cover_image_path = None
+        self.original_image_path = None # Orijinal resim yolunu saklamak için
         self.style.configure("CoverSelected.TLabel", background="#ADD8E6")  # Yeni stil
         
         # GUI bileşenleri
@@ -62,15 +63,24 @@ class StegoGUI:
         self.input_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         self.input_label = ttk.Label(self.input_frame)
         self.input_label.pack()
-
+        
+        # Input image boyut etiketi
+        self.input_dims_label = ttk.Label(self.input_frame, text="Boyut: -")
+        self.input_dims_label.pack(pady=5)
+        
         # Output Görüntü
         self.output_frame = ttk.LabelFrame(image_panel, text=" Output Image ", padding=10)
         self.output_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         self.output_label = ttk.Label(self.output_frame)
         self.output_label.pack()
+        
+        # Output image boyut etiketi
+        self.output_dims_label = ttk.Label(self.output_frame, text="Boyut: -")
+        self.output_dims_label.pack(pady=5)
+        
         self.psnr_label = ttk.Label(self.output_frame, text="PSNR: -", font=('Arial', 12))
         self.psnr_label.pack(pady=10)
-
+        
         # Paylaşım Thumbnail Alanı
         shares_frame = ttk.LabelFrame(main_frame, text=" Paylaşımlar ", padding=10)
         shares_frame.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -106,19 +116,65 @@ class StegoGUI:
         if path:
             self.original_image_path = path
             self.show_image(path, self.input_label, 400)
+        # Input image boyutlarını göster ---
+        try:
+            img = Image.open(path)
+            self.input_dims_label.config(text=f"Boyut: {img.width}x{img.height}")
+        except Exception as e:
+            self.input_dims_label.config(text="Boyut: Okunamadı")
+            print(f"Error getting input image dimensions: {e}")
+            
+        # Decode sonrası output'u temizle
+        self.output_label.config(image='')
+        self.output_label.image = None
+        self.output_dims_label.config(text="Boyut: -")
+        self.psnr_label.config(text="PSNR: -")
 
     def encode_image(self):
         if not self.original_image_path:
             messagebox.showerror("Hata", "Lütfen önce bir resim seçin!")
             return
         
+        if not self.cover_image_path:
+            messagebox.showerror("Hata", "Lütfen önce bir cover resim seçin!")
+            return
+        
         try:
+            # # Önceki paylaşımları temizle (dosya sisteminden)
+            # for i in range(1, self.n_var.get() + 20): # Olası eski paylaşımları silmek için geniş bir aralık
+            #     old_share_path = f"share_{i}.png"
+            #     if os.path.exists(old_share_path):
+            #         os.remove(old_share_path)
+
             lastfast.encode_image_raw_pixels(
                 self.original_image_path,
                 "share",
                 k=self.k_var.get(),
                 n=self.n_var.get(),
                 cover_image_path=self.cover_image_path
+            )
+            self.load_share_thumbnails()
+            messagebox.showinfo("Başarılı", f"{self.n_var.get()} pay oluşturuldu!")
+        except Exception as e:
+            messagebox.showerror("Hata", str(e))
+
+    def encode_image_shamir_only(self):
+        if not self.original_image_path:
+            messagebox.showerror("Hata", "Lütfen önce bir resim seçin!")
+            return
+        
+        try:
+            # # Önceki paylaşımları temizle (dosya sisteminden)
+            # for i in range(1, self.n_var.get() + 20): # Olası eski paylaşımları silmek için geniş bir aralık
+            #     old_share_path = f"share_{i}.png"
+            #     if os.path.exists(old_share_path):
+            #         os.remove(old_share_path)
+            
+            lastfast.encode_image_shamir_only(
+                self.original_image_path,
+                "share",
+                k=self.k_var.get(),
+                n=self.n_var.get(),
             )
             self.load_share_thumbnails()
             messagebox.showinfo("Başarılı", f"{self.n_var.get()} pay oluşturuldu!")
@@ -145,6 +201,8 @@ class StegoGUI:
             
             # Görüntüyü yükle
             img = Image.open(share_path)
+            # Paylaşım resminin orijinal boyutları
+            share_dims_text = f"Boyut: {img.width}x{img.height}"
             img.thumbnail((150, 150))
             photo = ImageTk.PhotoImage(img)
             
@@ -156,6 +214,9 @@ class StegoGUI:
             
             # Dosya adı
             ttk.Label(frame, text=os.path.basename(share_path)).pack()
+            
+            # Paylaşım boyut etiketini ekle
+            ttk.Label(frame, text=share_dims_text).pack()
             
             self.share_thumbnails.append(frame)
             col += 1
@@ -170,8 +231,11 @@ class StegoGUI:
             self.selected_shares.remove(share_path)
             frame.configure(style="TFrame")
         else:
+            # k değeri kadar seçim yapılmasına izin ver. Daha fazlasını engelle.
             if len(self.selected_shares) >= self.k_var.get():
+                messagebox.showwarning("Uyarı", f"En fazla {self.k_var.get()} paylaşım seçebilirsiniz.")
                 return
+            
             self.selected_shares.append(share_path)
             frame.configure(style="Selected.TFrame")
         
@@ -189,15 +253,32 @@ class StegoGUI:
         if len(self.selected_shares) < self.k_var.get():
             messagebox.showerror("Hata", f"En az {self.k_var.get()} pay seçmelisiniz!")
             return
+        if not self.original_image_path:
+            messagebox.showerror("Hata", "PSNR hesaplaması için orijinal resim seçilmemiş. Lütfen önce 'Resim Seç' ile orijinal resmi belirtin.")
+            return
         
+         # `lastfast.py` decode fonksiyonu `output_image_path_template` için `.jpg` veya `.png` bekliyor.
+        # Biz sabit bir isim kullanabiliriz.
+        decoded_image_filename = "decoded_image.jpg" # Sabit isim, uzantısı jpg
+
         try:
             lastfast.decode_image_raw_pixels(
                 self.selected_shares,
-                "decoded_image.jpg",
-                self.original_image_path,
-                k_threshold=self.k_var.get()
+                decoded_image_filename.replace(".jpg", ".{ext}"), # lastfast'in format stringine uygun hale getir,
+                self.original_image_path, # PSNR hesaplaması için orijinal resim yolu
+                k_threshold=self.k_var.get(),
+                save_as_jpeg_quality=95 # Yüksek kalite JPEG
             )
+            
             self.show_image("decoded_image.jpg", self.output_label, 400)
+            # Output image boyutlarını göster ---
+            try:
+                img = Image.open(decoded_image_filename)
+                self.output_dims_label.config(text=f"Boyut: {img.width}x{img.height}")
+            except Exception as e:
+                self.output_dims_label.config(text="Boyut: Okunamadı")
+                print(f"Error getting output image dimensions: {e}")
+            
             self.calculate_psnr()
             messagebox.showinfo("Başarılı", "Görüntü başarıyla çözüldü!")
         except Exception as e:
