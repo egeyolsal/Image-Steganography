@@ -7,7 +7,6 @@ import json
 
 # --- Galois Field İşlemleri ---
 PRIME = 251
-# ... (gf_add, gf_sub, gf_mul, gf_inverse, gf_div fonksiyonları burada) ...
 def gf_add(a, b): return (a + b) % PRIME
 def gf_sub(a, b): return (a - b) % PRIME
 def gf_mul(a, b): return (a * b) % PRIME
@@ -104,27 +103,6 @@ def embed_data(img_to_embed_in, data_to_embed):
     # Orijinal şekle geri dönüştür
     embedded_img = flat_img.reshape(img_h, img_w, 3)
     return embedded_img
-
-# def extract_data(stego_img):
-#     # Tüm LSB bitlerini tek seferde çıkar
-#     lsb_bits = (stego_img & 1).reshape(-1)
-#     lsb_bits_str = lsb_bits.astype(np.uint8).astype(str)
-#     all_extracted_bits = ''.join(lsb_bits_str)
-
-#     # İlk 32 biti (veri uzunluğu) oku
-#     if len(all_extracted_bits) < 32:
-#         raise ValueError("Veri uzunluğu okunamadı.")
-#     data_len = int(all_extracted_bits[:32], 2)
-#     total_bits_needed = 32 + data_len * 8
-
-#     # Yeterli bit kontrolü
-#     if len(all_extracted_bits) < total_bits_needed:
-#         raise ValueError("Yetersiz bit.")
-
-#     # Veriyi çıkar
-#     payload_bits = all_extracted_bits[32:total_bits_needed]
-#     payload_bytes = np.packbits(np.array(list(payload_bits), dtype=np.uint8).reshape(-1, 8), axis=1).tobytes()
-#     return bytes(payload_bytes)
 
 def extract_data(stego_img):
     # Tüm LSB'leri tek seferde al
@@ -247,9 +225,6 @@ def decode_image_raw_pixels(list_of_share_paths, output_image_path_template, ori
             print("HATA: Ham piksellerden görüntü oluşturulamadı.")
             return
         
-        # output_png_path = output_image_path_template.format(ext="png")
-        # cv2.imwrite(output_png_path, reconstructed_image_raw)
-        # print(f"Görüntü PNG olarak kaydedildi: '{output_png_path}'")
         output_jpg_path = output_image_path_template.format(ext="jpg")
         jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), save_as_jpeg_quality]
         cv2.imwrite(output_jpg_path, reconstructed_image_raw, jpeg_params)
