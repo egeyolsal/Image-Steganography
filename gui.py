@@ -100,7 +100,6 @@ class StegoGUI:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-    # Değişiklik 3: Cover image yükleme fonksiyonu
     def load_cover_image(self):
         path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
         if path:
