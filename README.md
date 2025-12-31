@@ -109,6 +109,6 @@ Projenin temelini oluşturan algoritmalar `lastfast.py` dosyasında bulunmaktad�
 
 ## Kaynaklar ve Bağlantılar
 
-1.  [Shamir's Secret Sharing - Wikipedia](https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing#Python_code)
+1.  [Shamir's Secret Sharing - Wikipedia](https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing)
 2.  [LSB-Steganography](https://www.researchgate.net/publication/371671984_Steganography_in_Images_Using_LSB_Technique)
 3.  [Tkinter - GUI](https://docs.python.org/3/library/tkinter.html)
