@@ -254,12 +254,12 @@ if __name__ == "__main__":
 
     K_PARAM = 3
     N_PARAM = 6
-    INPUT_IMAGE_FILENAME = "input.jpg"
+    INPUT_IMAGE_FILENAME = "assets/input.jpg"
     try:
         if cv2.imread(INPUT_IMAGE_FILENAME) is None:
             dummy_img = np.zeros((60, 80, 3), dtype=np.uint8)
             cv2.putText(dummy_img, "Test!", (5, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-            cv2.imwrite("input.png", dummy_img)
+            cv2.imwrite(INPUT_IMAGE_FILENAME, dummy_img)
             # cv2.imwrite("input.jpg", dummy_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95]) # JPEG testi için
             print(f"Test için '{INPUT_IMAGE_FILENAME}' oluşturuldu.")
             # INPUT_IMAGE_FILENAME = "input.jpg" # Eğer JPEG test ediyorsanız
@@ -271,7 +271,7 @@ if __name__ == "__main__":
 
     print(f"\n--- HAM PİKSEL KODLAMA (Giriş: {INPUT_IMAGE_FILENAME}) ---")
     try:
-        encode_image_raw_pixels(INPUT_IMAGE_FILENAME, SHARE_OUTPUT_PREFIX, k=K_PARAM, n=N_PARAM, cover_image_path = "flower.jpg")
+        encode_image_raw_pixels(INPUT_IMAGE_FILENAME, SHARE_OUTPUT_PREFIX, k=K_PARAM, n=N_PARAM, cover_image_path = "assets/flower.jpg")
     except FileNotFoundError as e_fnf:
         print(f"Kodlama Hatası: {e_fnf}")
     except Exception as e_encode:
